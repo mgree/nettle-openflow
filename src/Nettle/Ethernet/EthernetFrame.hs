@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies #-}
+{-# LANGUAGE TypeOperators, MultiParamTypeClasses, FunctionalDependencies, DataKinds, GADTs #-}
 {-# LANGUAGE BangPatterns #-}
 
 -- | This module provides data structures for Ethernet frames
@@ -55,7 +55,7 @@ import qualified Data.Binary.Get as Binary
 
 -- | An Ethernet frame is either an IP packet, an ARP packet, or an uninterpreted @ByteString@.
 -- Based on http://en.wikipedia.org/wiki/File:Ethernet_Type_II_Frame_format.svg
-type EthernetFrame = EthernetHeader :*: EthernetBody :*: HNil
+type EthernetFrame = HList '[EthernetHeader, EthernetBody]
                      
 
 data EthernetBody  = IPInEthernet !IPPacket
@@ -71,28 +71,27 @@ foldEthernetBody f g h (IPInEthernet x) = f x
 foldEthernetBody f g h (ARPInEthernet x) = g x
 foldEthernetBody f g h (UninterpretedEthernetBody x) = h x
 
-withFrame :: HList l 
-             => (EthernetBody -> Maybe l) 
+withFrame :: (EthernetBody -> Maybe (HList l)) 
              -> EthernetFrame 
-             -> Maybe (EthernetHeader :*: l)
-withFrame f frame = foldEthernetFrame (\h b -> fmap (hCons h) (f b)) frame
+             -> Maybe (HList (EthernetHeader ': l))
+withFrame f frame = foldEthernetFrame (\h b -> fmap (HCons h) (f b)) frame
 
-fromIPPacket :: EthernetBody -> Maybe IPPacket
-fromIPPacket = foldEthernetBody Just (const Nothing) (const Nothing)
+fromIPPacket :: EthernetBody -> Maybe (HList '[IPPacket])
+fromIPPacket = foldEthernetBody (\x -> Just (HCons x HNil)) (const Nothing) (const Nothing)
 
-fromARPPacket :: EthernetBody -> Maybe (ARPPacket :*: HNil)
-fromARPPacket = foldEthernetBody (const Nothing) (\x -> Just (hCons x HNil)) (const Nothing)
+fromARPPacket :: EthernetBody -> Maybe (HList '[ARPPacket])
+fromARPPacket = foldEthernetBody (const Nothing) (\x -> Just (HCons x HNil)) (const Nothing)
 
-eth_ip_packet :: EthernetFrame -> Maybe (EthernetHeader :*: IPPacket)
+eth_ip_packet :: EthernetFrame -> Maybe (HList '[EthernetHeader,IPPacket])
 eth_ip_packet = withFrame fromIPPacket
 
-eth_ip_tcp_packet :: EthernetFrame -> Maybe (EthernetHeader :*: IPHeader :*: TCPHeader :*: HNil)
-eth_ip_tcp_packet = withFrame $ fromIPPacket >=> withIPPacket fromTCPPacket
+eth_ip_tcp_packet :: EthernetFrame -> Maybe (HList '[EthernetHeader,IPHeader,TCPHeader])
+eth_ip_tcp_packet = withFrame $ fromIPPacket >=> (withIPPacket fromTCPPacket) . hHead
 
-eth_ip_udp_packet :: EthernetFrame -> Maybe (EthernetHeader :*: IPHeader :*: UDPHeader :*: HNil)
-eth_ip_udp_packet = withFrame $ fromIPPacket >=> withIPPacket fromUDPPacket
+eth_ip_udp_packet :: EthernetFrame -> Maybe (HList '[EthernetHeader,IPHeader,UDPHeader])
+eth_ip_udp_packet = withFrame $ fromIPPacket >=> (withIPPacket fromUDPPacket) . hHead
 
-eth_arp_packet :: EthernetFrame -> Maybe (EthernetHeader :*: ARPPacket :*: HNil)
+eth_arp_packet :: EthernetFrame -> Maybe (HList '[EthernetHeader,ARPPacket])
 eth_arp_packet = withFrame fromARPPacket
 
 
@@ -120,7 +119,7 @@ arpQuery :: EthernetAddress   -- ^ source hardware address
             -> IPAddress      -- ^ source IP address
             -> IPAddress      -- ^ target IP address
             -> EthernetFrame
-arpQuery sha spa tpa = hCons hdr (hCons (ARPInEthernet ( body)) hNil)
+arpQuery sha spa tpa = HCons hdr (HCons (ARPInEthernet ( body)) HNil)
   where hdr = EthernetHeader { destMACAddress    = broadcastAddress
                              , sourceMACAddress  = sha
                              , typeCode          = ethTypeARP 
@@ -137,7 +136,7 @@ arpReply :: EthernetAddress     -- ^ source hardware address
             -> EthernetAddress  -- ^ target hardware address
             -> IPAddress        -- ^ target IP address
             -> EthernetFrame
-arpReply sha spa tha tpa = hCons hdr (hCons (ARPInEthernet ( body)) hNil)
+arpReply sha spa tha tpa = HCons hdr (HCons (ARPInEthernet ( body)) HNil)
   where hdr = EthernetHeader { destMACAddress   = tha
                              , sourceMACAddress = sha
                              , typeCode         = ethTypeARP 
@@ -156,11 +155,11 @@ getEthernetFrame = do
   hdr <- getEthHeader
   if typeCode hdr == ethTypeIP
     then do ipPacket <- getIPPacket
-            return $ hCons hdr (hCons (IPInEthernet ipPacket) hNil)            
+            return $ HCons hdr (HCons (IPInEthernet ipPacket) HNil)            
     else if typeCode hdr == ethTypeARP
          then do mArpPacket <- getARPPacket
                  case mArpPacket of
-                   Just arpPacket -> return $ hCons hdr (hCons (ARPInEthernet arpPacket) hNil)
+                   Just arpPacket -> return $ HCons hdr (HCons (ARPInEthernet arpPacket) HNil)
                    Nothing -> error "unknown ethernet frame"
          else error "unknown ethernet frame" 
 {-# INLINE getEthernetFrame #-}
@@ -172,16 +171,16 @@ getEthernetFrame2 total = do
   let r = total - fromIntegral soFar 
   if typeCode hdr == ethTypeIP
     then do ipPacket <- getIPPacket2
-            return $ hCons hdr (hCons (IPInEthernet ipPacket) hNil)            
+            return $ HCons hdr (HCons (IPInEthernet ipPacket) HNil)            
     else if typeCode hdr == ethTypeARP
          then do mArpPacket <- getARPPacket2
                  case mArpPacket of
-                   Just arpPacket -> return $ hCons hdr (hCons (ARPInEthernet arpPacket) hNil)
+                   Just arpPacket -> return $ HCons hdr (HCons (ARPInEthernet arpPacket) HNil)
                    Nothing -> 
                      do body <- Binary.getByteString r
-                        return $ hCons hdr (hCons (UninterpretedEthernetBody B.empty) hNil)  
+                        return $ HCons hdr (HCons (UninterpretedEthernetBody B.empty) HNil)  
          else do body <- Binary.getByteString r
-                 return $ hCons hdr (hCons (UninterpretedEthernetBody B.empty) hNil)  
+                 return $ HCons hdr (HCons (UninterpretedEthernetBody B.empty) HNil)  
 
 
 -- | Parser for Ethernet headers.

@@ -23,7 +23,7 @@ import Data.Map (Map)
 import qualified Data.Map as Map
 import Data.Array.IO
 import Data.Array.Unboxed
-import Data.Array.Base (unsafeWrite, unsafeRead)
+import Data.Array.Base (unsafeWrite, unsafeRead, unsafeFreeze, unsafeThaw)
 import GHC.Arr (unsafeIndex)
 import Control.Monad (forM_)
 import Text.Printf

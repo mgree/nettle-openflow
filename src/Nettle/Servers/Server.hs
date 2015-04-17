@@ -58,14 +58,14 @@ import qualified Data.Map as Map
 import Text.Printf
 import Control.Concurrent
 import Data.IORef
-import Data.CAS
 import Data.Array.IArray hiding ((!))
 import qualified Data.Array.IArray as A
 import Foreign.C.Types
 import Network.Socket.Internal (throwSocketErrorIfMinus1RetryMayBlock)
 import GHC.Base
 import GHC.Ptr
-import GHC.Exts (traceEvent)
+import Debug.Trace (traceEventIO)
+import Data.Atomics (readForCAS, peekTicket, casIORef, Ticket)
 
 data StrictList a = Cons !a (StrictList a) | Nil 
                   deriving (Show,Eq)
@@ -75,7 +75,6 @@ mapM_' f Nil = return ()
 mapM_' f (Cons a rest) = f a >> mapM_' f rest
 
 type ServerPortNumber = Word16
-deriving instance Ord SockAddr
 
 -- | Abstract type containing the state of the OpenFlow server.
 newtype OpenFlowServer a = OpenFlowServer (Socket, IORef (Map SwitchID (SwitchHandle a)), FrameParser a)
@@ -200,7 +199,7 @@ recvInner :: CInt -> Int -> Ptr Word8 -> IO Int
 recvInner s nbytes ptr =
     fmap fromIntegral $
         throwSocketErrorIfMinus1RetryMayBlock "recv"
-        (traceEvent ("Read wait socket " ++ show s) >> threadWaitRead (fromIntegral s)) $
+        (traceEventIO ("Read wait socket " ++ show s) >> threadWaitRead (fromIntegral s)) $
         c_recv s (castPtr ptr) (fromIntegral nbytes) 0
 
 foreign import ccall unsafe "recv"
@@ -576,13 +575,13 @@ type Lock = IORef Bool
 newLock :: IO Lock
 newLock = newIORef False
 
-readUntilRelease :: Lock -> IO ()
+readUntilRelease :: Lock -> IO (Ticket Bool)
 readUntilRelease lock = go 0
-  where go :: Int -> IO ()
-        go !n = do b <- readIORef lock
-                   if b
+  where go :: Int -> IO (Ticket Bool)
+        go !n = do b <- readForCAS lock
+                   if peekTicket b
                      then if (n==maxspins) then (yield >> go 0) else go (n + 1)
-                     else return ()
+                     else return b 
         maxspins = 100
 {-# INLINE readUntilRelease #-}        
         
@@ -592,9 +591,9 @@ release lock = writeIORef lock False
 
 spinLock :: Lock -> IO ()
 spinLock lock = go
-  where go = do readUntilRelease lock
-                (_, prev) <- casIORef lock False True 
-                if prev
+  where go = do b <- readUntilRelease lock
+                (_, prev) <- casIORef lock b {- == False -} True 
+                if peekTicket prev -- will be False if we succeeded!
                   then yield >> go
                   else return ()
 

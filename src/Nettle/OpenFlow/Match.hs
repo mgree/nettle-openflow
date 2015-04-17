@@ -1,4 +1,4 @@
-{-# LANGUAGE CPP, DisambiguateRecordFields, RecordWildCards, NamedFieldPuns #-}
+{-# LANGUAGE CPP, DisambiguateRecordFields, RecordWildCards, NamedFieldPuns, GADTs, DataKinds, FlexibleInstances #-}
 {-# LANGUAGE BangPatterns #-}
 
 module Nettle.OpenFlow.Match ( 
@@ -204,24 +204,26 @@ matches (inPort, frame) (m@Match { inPort=inPort', ipTypeOfService=ipTypeOfServi
           matchesEthFrameType  t = t == typeCode ethHeader
           matchesIPProtocol protCode = 
               case eth_ip_packet frame of 
-                Just pkt -> IP.ipProtocol (hOccurs pkt) == protCode
+                Just pkt -> IP.ipProtocol (getIPHeader pkt) == protCode
                 _        -> True
           matchesIPToS tos =
                 case eth_ip_packet frame of 
-                  Just pkt -> tos == IP.dscp (hOccurs pkt)
+                  Just pkt -> tos == IP.dscp (getIPHeader pkt)
                   _        -> True
           matchesIPSourcePrefix prefix = 
               case eth_ip_packet frame of 
-                Just pkt -> IP.ipSrcAddress (hOccurs pkt) `elemOfPrefix` prefix
+                Just pkt -> 
+                  IP.ipSrcAddress (getIPHeader pkt) `elemOfPrefix` prefix
                 Nothing  -> True
           matchesIPDestPrefix prefix = 
               case eth_ip_packet frame of 
-                Just pkt -> IP.ipSrcAddress (hOccurs pkt) `elemOfPrefix` prefix
+                Just pkt -> 
+                  IP.ipDstAddress (getIPHeader pkt) `elemOfPrefix` prefix
                 Nothing  -> True
           matchesSrcTransportPort sp = 
                 case eth_ip_packet frame of
                   Just pkt -> 
-                    case hOccurs pkt of
+                    case getIPBody pkt of
                       IP.TCPInIP (srcPort, _) -> srcPort == sp
                       IP.UDPInIP (srcPort, _)  -> srcPort == sp
                       _ -> True
@@ -229,8 +231,11 @@ matches (inPort, frame) (m@Match { inPort=inPort', ipTypeOfService=ipTypeOfServi
           matchesDstTransportPort dp = 
                 case eth_ip_packet frame of
                   Just ipPacket ->
-                    case hOccurs ipPacket of 
+                    case getIPBody ipPacket of 
                       IP.TCPInIP (_, dstPort) -> dstPort == dp
                       IP.UDPInIP (_, dstPort) -> dstPort == dp
                       _                       -> True
                   Nothing -> True
+
+getIPHeader pkt = (hOccurs (hOccurs pkt :: IP.IPPacket) :: IP.IPHeader)
+getIPBody pkt = (hOccurs (hOccurs pkt :: IP.IPPacket) :: IP.IPBody)

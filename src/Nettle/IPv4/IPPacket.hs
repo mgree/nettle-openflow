@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeSynonymInstances, TypeOperators, MultiParamTypeClasses, FunctionalDependencies, RecordWildCards #-}
+{-# LANGUAGE TypeSynonymInstances, TypeOperators, MultiParamTypeClasses, FunctionalDependencies, RecordWildCards, DataKinds, GADTs #-}
 {-# LANGUAGE BangPatterns #-}
 
 {-|
@@ -68,7 +68,7 @@ import Data.ByteString as S
 import qualified Data.Binary.Get as Binary
 
 -- | An IP packet consists of a header and a body.
-type IPPacket = IPHeader :*: IPBody :*: HNil
+type IPPacket = HList '[IPHeader, IPBody]
 
 
 -- | An IP Header includes various information about the packet, including the type of payload it contains. 
@@ -113,18 +113,18 @@ foldIPBody f g h k (ICMPInIP x) = h x
 foldIPBody f g h k UninterpretedIPBody = k 
 
 
-fromTCPPacket :: IPBody -> Maybe (TCPHeader :*: HNil)
-fromTCPPacket (TCPInIP body) = Just (hCons body hNil)
+fromTCPPacket :: IPBody -> Maybe (HList '[TCPHeader])
+fromTCPPacket (TCPInIP body) = Just (HCons body HNil)
 fromTCPPacket _ = Nothing
 
 
-fromUDPPacket :: IPBody -> Maybe (UDPHeader :*: HNil)
-fromUDPPacket (UDPInIP hdr) = Just (hCons hdr hNil)
+fromUDPPacket :: IPBody -> Maybe (HList '[UDPHeader])
+fromUDPPacket (UDPInIP hdr) = Just (HCons hdr HNil)
 fromUDPPacket _ = Nothing
 
 
-withIPPacket :: HList l => (IPBody -> Maybe l) -> IPPacket -> Maybe (IPHeader :*: l)
-withIPPacket f pkt = fmap (hCons (hOccurs pkt)) (f (hOccurs pkt))
+withIPPacket :: (IPBody -> Maybe (HList l)) -> IPPacket -> Maybe (HList (IPHeader ': l))
+withIPPacket f pkt = fmap (HCons (hOccurs pkt)) (f (hOccurs pkt))
 
 getIPHeader :: Get IPHeader
 getIPHeader = do 
@@ -186,14 +186,14 @@ getIPPacket = do
   return body
     where getIPBody hdr@(IPHeader {..}) 
               | ipProtocol == ipTypeTcp  = do tcpHdr <- getTCPHeader
-                                              return (hCons hdr (hCons (TCPInIP tcpHdr) hNil))
+                                              return (HCons hdr (HCons (TCPInIP tcpHdr) HNil))
               | ipProtocol == ipTypeUdp  = do udpHdr <- getUDPHeader  
                                               -- body <- getByteString (fromIntegral (totalLength - (4 * headerLength)) - 4)
-                                              return (hCons hdr (hCons (UDPInIP udpHdr) hNil))
+                                              return (HCons hdr (HCons (UDPInIP udpHdr) HNil))
               | ipProtocol == ipTypeIcmp = do icmpHdr <- getICMPHeader 
-                                              return (hCons hdr (hCons (ICMPInIP icmpHdr) hNil))
+                                              return (HCons hdr (HCons (ICMPInIP icmpHdr) HNil))
               | otherwise                = do bs <- return S.empty {- getByteString (fromIntegral (totalLength - (4 * headerLength))) -} 
-                                              return (hCons hdr (hCons UninterpretedIPBody hNil))
+                                              return (HCons hdr (HCons UninterpretedIPBody HNil))
 {-# INLINE getIPPacket #-}
           
 getIPPacket2 :: Binary.Get IPPacket 
@@ -202,13 +202,13 @@ getIPPacket2 = do
   body <- getIPBody hdr
   return body
     where getIPBody hdr@(IPHeader {..}) 
-              | ipProtocol == ipTypeTcp  = getTCPHeader2  >>= return . (\tcpHdr -> hCons hdr (hCons (TCPInIP tcpHdr) hNil))
+              | ipProtocol == ipTypeTcp  = getTCPHeader2  >>= return . (\tcpHdr -> HCons hdr (HCons (TCPInIP tcpHdr) HNil))
               | ipProtocol == ipTypeUdp  = do udpHdr <- getUDPHeader2  
                                               body <- Binary.getByteString (fromIntegral (totalLength - (4 * headerLength)))
-                                              return (hCons hdr (hCons (UDPInIP udpHdr) hNil))
-              | ipProtocol == ipTypeIcmp = getICMPHeader2 >>= return . (\icmpHdr -> hCons hdr (hCons (ICMPInIP icmpHdr) hNil))
+                                              return (HCons hdr (HCons (UDPInIP udpHdr) HNil))
+              | ipProtocol == ipTypeIcmp = getICMPHeader2 >>= return . (\icmpHdr -> HCons hdr (HCons (ICMPInIP icmpHdr) HNil))
               | otherwise                = Binary.getByteString (fromIntegral (totalLength - (4 * headerLength))) >>= 
-                                           return . (\bs -> hCons hdr (hCons UninterpretedIPBody hNil))
+                                           return . (\bs -> HCons hdr (HCons UninterpretedIPBody HNil))
 
 -- Transport Header
 
