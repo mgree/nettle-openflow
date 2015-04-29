@@ -52,6 +52,7 @@ import Data.HList
 import qualified Nettle.OpenFlow.Get as Strict
 import qualified Nettle.OpenFlow.StrictPut as Strict
 import qualified Data.Binary.Get as Binary
+import Text.Printf (printf)
 
 -- | An Ethernet frame is either an IP packet, an ARP packet, or an uninterpreted @ByteString@.
 -- Based on http://en.wikipedia.org/wiki/File:Ethernet_Type_II_Frame_format.svg
@@ -153,6 +154,7 @@ arpReply sha spa tha tpa = HCons hdr (HCons (ARPInEthernet ( body)) HNil)
 getEthernetFrame :: Strict.Get EthernetFrame
 getEthernetFrame = do 
   hdr <- getEthHeader
+  let code = printf "%x" $ typeCode hdr
   if typeCode hdr == ethTypeIP
     then do ipPacket <- getIPPacket
             return $ HCons hdr (HCons (IPInEthernet ipPacket) HNil)            
@@ -160,8 +162,8 @@ getEthernetFrame = do
          then do mArpPacket <- getARPPacket
                  case mArpPacket of
                    Just arpPacket -> return $ HCons hdr (HCons (ARPInEthernet arpPacket) HNil)
-                   Nothing -> error $ "unknown ethernet frame: " ++ show (typeCode hdr)
-         else error $ "unknown ethernet frame: " ++ show (typeCode hdr)
+                   Nothing -> error $ "unknown ethernet frame: " ++ code
+         else error $ "unknown ethernet frame: " ++ code
 {-# INLINE getEthernetFrame #-}
 
 getEthernetFrame2 :: Int -> Binary.Get EthernetFrame
