@@ -160,8 +160,8 @@ getEthernetFrame = do
          then do mArpPacket <- getARPPacket
                  case mArpPacket of
                    Just arpPacket -> return $ HCons hdr (HCons (ARPInEthernet arpPacket) HNil)
-                   Nothing -> error "unknown ethernet frame"
-         else error "unknown ethernet frame" 
+                   Nothing -> error $ "unknown ethernet frame: " ++ show (typeCode hdr)
+         else error $ "unknown ethernet frame: " ++ show (typeCode hdr)
 {-# INLINE getEthernetFrame #-}
 
 getEthernetFrame2 :: Int -> Binary.Get EthernetFrame
