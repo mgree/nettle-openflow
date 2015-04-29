@@ -154,7 +154,7 @@ arpReply sha spa tha tpa = HCons hdr (HCons (ARPInEthernet ( body)) HNil)
 getEthernetFrame :: Strict.Get EthernetFrame
 getEthernetFrame = do 
   hdr <- getEthHeader
-  let code = printf "%x" $ typeCode hdr
+  let code = printf "0x%x" $ typeCode hdr
   if typeCode hdr == ethTypeIP
     then do ipPacket <- getIPPacket
             return $ HCons hdr (HCons (IPInEthernet ipPacket) HNil)            
